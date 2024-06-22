@@ -33,6 +33,12 @@ pipeline:
             new_record["labels"] = nil
           end
 
+          trace = new_record["peavy/traceId"]
+          if trace then
+            new_record["logging.googleapis.com/trace"] = tostring(trace)
+            new_record["peavy/traceId"] = nil
+          end
+
           record_timestamp = new_record["timestamp"]
           if record_timestamp then
             new_record["timestamp"] = nil
