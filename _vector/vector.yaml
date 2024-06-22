@@ -1,0 +1,33 @@
+sources:
+  http:
+    type: http_server
+    address: 0.0.0.0:8000
+    encoding: ndjson
+    path_key: ""
+transforms:
+  gcp_transform:
+    inputs:
+      - http
+    type: remap
+    source: |-
+      del(.source_type)
+      .severity = .severity || "info"
+      peavy_labels, err = object(."peavy/labels")
+      if err == null {
+        peavy_labels = map_keys(peavy_labels) -> |k| { "peavy/{{ k }}" }
+        if .labels != null {
+          .labels, _ = merge(.labels, peavy_labels)
+        } else {
+          .labels = peavy_labels
+        }
+      }
+      del(."peavy/labels")
+      .labels."peavy/log" = true
+sinks:
+  console:
+    inputs:
+      - gcp_transform
+    target: stdout
+    type: console
+    encoding:
+      codec: json  
