@@ -9,3 +9,9 @@ that converts the log lines from peavy request format
 into a suitable Google Cloud Logging json format.
 
 The lua filter also parses and transforms the iso8601 timestamp.
+
+## Usage
+
+```bash
+docker run -p 8000:8000 ghcr.io/peavy-log/server
+```
