@@ -46,8 +46,8 @@ func handler(ctx *fasthttp.RequestCtx) {
 	}
 
 	reader := ctx.Request.BodyStream()
-	var err error
 	if string(ctx.Request.Header.ContentEncoding()) == "gzip" {
+		var err error
 		reader, err = gzip.NewReader(reader)
 		if err != nil {
 			ctx.Response.SetStatusCode(fasthttp.StatusBadRequest)
@@ -89,12 +89,10 @@ func startFluentBit() {
 	cmd := exec.Command("/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.yaml")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err := cmd.Start()
-	if err != nil {
+	if err := cmd.Start(); err != nil {
 		log.Fatalf("error starting fluent-bit: %s", err)
 	}
-	err = cmd.Wait()
-	if err != nil {
+	if err := cmd.Wait(); err != nil {
 		log.Fatalf("fluent-bit error: %s", err)
 	}
 }
@@ -107,13 +105,14 @@ func main() {
 		Name:              "peavy",
 		StreamRequestBody: true,
 	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8000"
 	}
 	log.Println("peavy listening, port " + port)
-	err := server.ListenAndServe(":" + port)
-	if err != nil {
+
+	if err := server.ListenAndServe(":" + port); err != nil {
 		log.Fatalf("error starting: %s", err)
 	}
 }
