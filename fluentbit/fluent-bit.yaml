@@ -53,4 +53,5 @@ pipeline:
       match: "*"
       resource: global
       severity_key: severity
+      autoformat_stackdriver_trace: true
       compress: gzip
