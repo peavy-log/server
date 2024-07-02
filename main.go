@@ -10,14 +10,30 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
 
 const (
 	MAX_LINE_SIZE = 256 * 1024
 )
 
-var errorCount = 0
+var (
+	errorCount  = 0
+	lineCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "peavy_processed_lines_total",
+		Help: "The total number of processed lines",
+	})
+	byteCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "peavy_processed_bytes_total",
+		Help: "The total number of processed bytes",
+	})
+
+	promHandler = fasthttpadaptor.NewFastHTTPHandler(promhttp.Handler())
+)
 
 func handleHealth(ctx *fasthttp.RequestCtx) {
 	if errorCount > 3 {
@@ -43,6 +59,9 @@ func handler(ctx *fasthttp.RequestCtx) {
 	if string(ctx.Path()) == "/healthz" {
 		handleHealth(ctx)
 		return
+	} else if string(ctx.Path()) == "/metrics" {
+		promHandler(ctx)
+		return
 	} else if string(ctx.Method()) != fasthttp.MethodPost {
 		ctx.Response.SetStatusCode(fasthttp.StatusMethodNotAllowed)
 		fmt.Fprint(ctx, "Method Not Allowed\n")
@@ -65,7 +84,10 @@ func handler(ctx *fasthttp.RequestCtx) {
 	buffered.Buffer(buf, MAX_LINE_SIZE)
 
 	for buffered.Scan() {
-		writer(buffered.Bytes())
+		bytes := buffered.Bytes()
+		writer(bytes)
+		lineCounter.Inc()
+		byteCounter.Add(float64(len(bytes)))
 	}
 
 	if closer, ok := reader.(io.Closer); ok {
