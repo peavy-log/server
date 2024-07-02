@@ -43,6 +43,10 @@ func handler(ctx *fasthttp.RequestCtx) {
 	if string(ctx.Path()) == "/healthz" {
 		handleHealth(ctx)
 		return
+	} else if string(ctx.Method()) != fasthttp.MethodPost {
+		ctx.Response.SetStatusCode(fasthttp.StatusMethodNotAllowed)
+		fmt.Fprint(ctx, "Method Not Allowed\n")
+		return
 	}
 
 	reader := ctx.Request.BodyStream()
