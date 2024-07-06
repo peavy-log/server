@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sync"
+	"unsafe"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -18,10 +20,18 @@ import (
 )
 
 const (
-	MAX_LINE_SIZE = 256 * 1024
+	DEF_LINE_SIZE = 2 * 1024
+	MAX_LINE_SIZE = 64 * 1024
 )
 
 var (
+	bufferPool = &sync.Pool{
+		New: func() any {
+			buf := make([]byte, 0, DEF_LINE_SIZE)
+			return &buf
+		},
+	}
+
 	errorCount  = 0
 	lineCounter = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "peavy_processed_lines_total",
@@ -34,6 +44,10 @@ var (
 
 	promHandler = fasthttpadaptor.NewFastHTTPHandler(promhttp.Handler())
 )
+
+func byteCmp(a []byte, b string) bool {
+	return *(*string)(unsafe.Pointer(&a)) == b
+}
 
 func handleHealth(ctx *fasthttp.RequestCtx) {
 	if errorCount > 3 {
@@ -56,20 +70,20 @@ func handler(ctx *fasthttp.RequestCtx) {
 		}
 	}()
 
-	if string(ctx.Path()) == "/healthz" {
+	if byteCmp(ctx.Path(), "/healthz") {
 		handleHealth(ctx)
 		return
-	} else if string(ctx.Path()) == "/metrics" {
+	} else if byteCmp(ctx.Path(), "/metrics") {
 		promHandler(ctx)
 		return
-	} else if string(ctx.Method()) != fasthttp.MethodPost {
+	} else if !byteCmp(ctx.Method(), fasthttp.MethodPost) {
 		ctx.Response.SetStatusCode(fasthttp.StatusMethodNotAllowed)
 		fmt.Fprint(ctx, "Method Not Allowed\n")
 		return
 	}
 
 	reader := ctx.Request.BodyStream()
-	if string(ctx.Request.Header.ContentEncoding()) == "gzip" {
+	if byteCmp(ctx.Request.Header.ContentEncoding(), "gzip") {
 		var err error
 		reader, err = gzip.NewReader(reader)
 		if err != nil {
@@ -80,35 +94,35 @@ func handler(ctx *fasthttp.RequestCtx) {
 	}
 
 	buffered := bufio.NewScanner(reader)
-	buf := make([]byte, 0, MAX_LINE_SIZE)
+	buf := *bufferPool.Get().(*[]byte)
 	buffered.Buffer(buf, MAX_LINE_SIZE)
+
+	conn, err := net.Dial("tcp", "127.0.0.1:8001")
+	if err != nil {
+		log.Printf("error connecting to fluentbit: %s", err)
+		panic(err)
+	}
+	defer conn.Close()
 
 	for buffered.Scan() {
 		bytes := buffered.Bytes()
-		writer(bytes)
+
+		_, err = conn.Write(bytes)
+		if err != nil {
+			log.Printf("error writing to fluentbit: %s", err)
+			panic(err)
+		}
+
 		lineCounter.Inc()
 		byteCounter.Add(float64(len(bytes)))
 	}
+	bufferPool.Put(&buf)
 
 	if closer, ok := reader.(io.Closer); ok {
 		closer.Close()
 	}
 
 	ctx.Response.SetStatusCode(fasthttp.StatusCreated)
-}
-
-func writer(bytes []byte) {
-	conn, err := net.Dial("tcp", "127.0.0.1:8001")
-	if err != nil {
-		log.Printf("error connecting to fluentbit: %s", err)
-		panic(err)
-	}
-
-	_, err = conn.Write(bytes)
-	if err != nil {
-		log.Printf("error writing to fluentbit: %s", err)
-		panic(err)
-	}
 }
 
 func startFluentBit() {
