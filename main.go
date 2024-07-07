@@ -12,6 +12,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/a8m/envsubst"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -126,7 +127,16 @@ func handler(ctx *fasthttp.RequestCtx) {
 }
 
 func startFluentBit() {
-	cmd := exec.Command("/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.yaml")
+	conf, err := envsubst.ReadFile("/fluent-bit/etc/fluent-bit.conf")
+	if err != nil {
+		log.Fatalf("error reading fluent-bit.conf: %s", err)
+	}
+	err = os.WriteFile("/fluent-bit/etc/fluent-bit.conf", conf, 0644)
+	if err != nil {
+		log.Fatalf("error writing fluent-bit.conf: %s", err)
+	}
+
+	cmd := exec.Command("/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.conf")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

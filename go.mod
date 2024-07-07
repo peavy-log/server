@@ -16,6 +16,7 @@ require (
 )
 
 require (
+	github.com/a8m/envsubst v1.4.2
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/prometheus/client_golang v1.19.1
