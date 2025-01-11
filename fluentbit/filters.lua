@@ -31,14 +31,27 @@ function google_cloud(tag, timestamp, record)
 
   record_timestamp = new_record["timestamp"]
   if record_timestamp then
-    new_record["timestamp"] = nil
     year, month, day, hour, minute, second, milli = record_timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+).(%d+)Z")
     if not year then
       year, month, day, hour, minute, second = record_timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)Z")
+      milli = nil
     end
     timestamp = os.time({year=year, month=month, day=day, hour=hour, min=minute, sec=second})
+
     if milli then
-      timestamp = timestamp + tonumber(milli) / 1000
+      milli_length = string.len(milli)
+
+      new_record["timestamp"] = {
+        seconds = timestamp,
+        nanos = tonumber(milli) * (10^(9 - milli_length))
+      }
+
+      timestamp = timestamp + (tonumber(milli) / (10^milli_length))
+    else
+      new_record["timestamp"] = {
+        seconds = timestamp,
+        nanos = 0
+      }
     end
   end
 
