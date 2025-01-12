@@ -10,12 +10,15 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/a8m/envsubst"
+	"github.com/cespare/xxhash"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
@@ -24,6 +27,11 @@ const (
 	DEF_LINE_SIZE = 2 * 1024
 	MAX_LINE_SIZE = 64 * 1024
 )
+
+type LineHash struct {
+	Count uint64
+	Exp   time.Time
+}
 
 var (
 	bufferPool = &sync.Pool{
@@ -42,12 +50,51 @@ var (
 		Name: "peavy_processed_bytes_total",
 		Help: "The total number of processed bytes",
 	})
+	_ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "peavy_line_limiter_size",
+		Help: "The size of the line hash map",
+	}, func() float64 {
+		return float64(lineLimiterMap.Size())
+	})
+
+	lineLimiterMap = xsync.NewMapOf[uint64, *LineHash]()
 
 	promHandler = fasthttpadaptor.NewFastHTTPHandler(promhttp.Handler())
 )
 
 func byteCmp(a []byte, b string) bool {
 	return *(*string)(unsafe.Pointer(&a)) == b
+}
+
+func acceptLine(line []byte) bool {
+	hash := xxhash.Sum64(line)
+	l, existed := lineLimiterMap.LoadOrStore(hash, &LineHash{Count: 1, Exp: time.Now().Add(5 * time.Second)})
+	if existed {
+		if l.Count > 10 {
+			return false
+		}
+		l.Count++
+	}
+	return true
+}
+
+func cleanLineLimiterExpiry(ticker *time.Ticker) {
+	for {
+		<-ticker.C
+
+		todo := lineLimiterMap.Size() / 5
+		if todo < 100 {
+			continue
+		}
+		i := 0
+		lineLimiterMap.Range(func(hash uint64, l *LineHash) bool {
+			if l.Exp.Before(time.Now()) {
+				lineLimiterMap.Delete(hash)
+			}
+			i++
+			return i < todo
+		})
+	}
 }
 
 func handleHealth(ctx *fasthttp.RequestCtx) {
@@ -108,6 +155,13 @@ func handler(ctx *fasthttp.RequestCtx) {
 	for buffered.Scan() {
 		bytes := buffered.Bytes()
 
+		// Simple limiter that prevents the exact same line
+		// from being processed too many times, usually as
+		// a result of a misconfigured client.
+		if !acceptLine(bytes) {
+			continue
+		}
+
 		_, err = conn.Write(bytes)
 		if err != nil {
 			log.Printf("error writing to fluentbit: %s", err)
@@ -149,6 +203,7 @@ func startFluentBit() {
 
 func main() {
 	go startFluentBit()
+	go cleanLineLimiterExpiry(time.NewTicker(1 * time.Second))
 
 	server := &fasthttp.Server{
 		Handler:           handler,

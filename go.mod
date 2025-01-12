@@ -2,7 +2,10 @@ module github.com/magnm/peavy-server
 
 go 1.22.4
 
-require github.com/valyala/fasthttp v1.55.0
+require (
+	github.com/cespare/xxhash v1.1.0
+	github.com/valyala/fasthttp v1.55.0
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -20,5 +23,6 @@ require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/prometheus/client_golang v1.19.1
+	github.com/puzpuzpuz/xsync/v3 v3.4.0
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 )
