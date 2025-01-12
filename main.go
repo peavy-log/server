@@ -52,9 +52,13 @@ var (
 	})
 	_ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "peavy_line_limiter_size",
-		Help: "The size of the line hash map",
+		Help: "The size of the line limiter map",
 	}, func() float64 {
 		return float64(lineLimiterMap.Size())
+	})
+	rejectedCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "peavy_line_limiter_rejected_total",
+		Help: "The total number of rejected lines by limiter",
 	})
 
 	lineLimiterMap = xsync.NewMapOf[uint64, *LineHash]()
@@ -71,6 +75,7 @@ func acceptLine(line []byte) bool {
 	l, existed := lineLimiterMap.LoadOrStore(hash, &LineHash{Count: 1, Exp: time.Now().Add(5 * time.Second)})
 	if existed {
 		if l.Count > 10 {
+			rejectedCounter.Inc()
 			return false
 		}
 		l.Count++
