@@ -73,7 +73,10 @@ func byteCmp(a []byte, b string) bool {
 func acceptLine(line []byte) bool {
 	hash := xxhash.Sum64(line)
 
-	lh, _ := lineLimiterMap.Compute(hash, func(lh *LineHash, _ bool) (*LineHash, bool) {
+	lh, _ := lineLimiterMap.Compute(hash, func(lh *LineHash, existed bool) (*LineHash, bool) {
+		if !existed {
+			lh.Exp = time.Now().Add(5 * time.Second)
+		}
 		lh.Count++
 		return lh, false
 	})
