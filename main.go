@@ -72,13 +72,14 @@ func byteCmp(a []byte, b string) bool {
 
 func acceptLine(line []byte) bool {
 	hash := xxhash.Sum64(line)
-	l, existed := lineLimiterMap.LoadOrStore(hash, &LineHash{Count: 1, Exp: time.Now().Add(5 * time.Second)})
-	if existed {
-		if l.Count > 10 {
-			rejectedCounter.Inc()
-			return false
-		}
-		l.Count++
+
+	lh, _ := lineLimiterMap.Compute(hash, func(lh *LineHash, _ bool) (*LineHash, bool) {
+		lh.Count++
+		return lh, false
+	})
+	if lh.Count > 5 {
+		rejectedCounter.Inc()
+		return false
 	}
 	return true
 }
