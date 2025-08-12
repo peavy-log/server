@@ -75,9 +75,10 @@ func acceptLine(line []byte) bool {
 
 	lh, _ := lineLimiterMap.Compute(hash, func(lh *LineHash, existed bool) (*LineHash, bool) {
 		if !existed {
-			lh.Exp = time.Now().Add(5 * time.Second)
+			lh = &LineHash{Count: 1, Exp: time.Now().Add(5 * time.Second)}
+		} else {
+			lh.Count++
 		}
-		lh.Count++
 		return lh, false
 	})
 	if lh.Count > 5 {
