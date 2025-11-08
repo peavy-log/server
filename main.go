@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -191,6 +192,11 @@ func handler(ctx *fasthttp.RequestCtx) {
 }
 
 func startFluentBit() {
+	// Convenience; set CLICKHOUSE_TLS to on if CLICKHOUSE_HOST contains https
+	if strings.Contains(os.Getenv("CLICKHOUSE_HOST"), "https://") {
+		os.Setenv("CLICKHOUSE_TLS", "on")
+	}
+
 	conf, err := envsubst.ReadFile("/fluent-bit/etc/fluent-bit.conf")
 	if err != nil {
 		log.Fatalf("error reading fluent-bit.conf: %s", err)
