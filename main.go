@@ -123,6 +123,7 @@ func handleCors(ctx *fasthttp.RequestCtx) {
 	ctx.Response.Header.Set("Access-Control-Allow-Origin", string(ctx.Request.Header.Peek("Origin")))
 	ctx.Response.Header.Set("Access-Control-Allow-Methods", "POST, PUT, OPTIONS")
 	ctx.Response.Header.Set("Access-Control-Allow-Headers", "Content-Type, Content-Encoding")
+	ctx.Response.Header.Set("Access-Control-Allow-Credentials", "true")
 }
 
 func handler(ctx *fasthttp.RequestCtx) {
@@ -153,7 +154,8 @@ func handler(ctx *fasthttp.RequestCtx) {
 	}
 
 	reader := ctx.Request.BodyStream()
-	if byteCmp(ctx.Request.Header.ContentEncoding(), "gzip") {
+	query := ctx.Request.URI().QueryArgs().Peek("gzip")
+	if byteCmp(ctx.Request.Header.ContentEncoding(), "gzip") || byteCmp(query, "true") {
 		var err error
 		reader, err = gzip.NewReader(reader)
 		if err != nil {
