@@ -119,6 +119,12 @@ func handleHealth(ctx *fasthttp.RequestCtx) {
 	errorCount = 0
 }
 
+func handleCors(ctx *fasthttp.RequestCtx) {
+	ctx.Response.Header.Set("Access-Control-Allow-Origin", string(ctx.Request.Header.Peek("Origin")))
+	ctx.Response.Header.Set("Access-Control-Allow-Methods", "POST, PUT, OPTIONS")
+	ctx.Response.Header.Set("Access-Control-Allow-Headers", "Content-Type, Content-Encoding")
+}
+
 func handler(ctx *fasthttp.RequestCtx) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -129,11 +135,16 @@ func handler(ctx *fasthttp.RequestCtx) {
 		}
 	}()
 
+	handleCors(ctx)
+
 	if byteCmp(ctx.Path(), "/healthz") {
 		handleHealth(ctx)
 		return
 	} else if byteCmp(ctx.Path(), "/metrics") {
 		promHandler(ctx)
+		return
+	} else if byteCmp(ctx.Method(), fasthttp.MethodOptions) {
+		ctx.Response.SetStatusCode(fasthttp.StatusNoContent)
 		return
 	} else if !byteCmp(ctx.Method(), fasthttp.MethodPost) {
 		ctx.Response.SetStatusCode(fasthttp.StatusMethodNotAllowed)
