@@ -1,7 +1,7 @@
 create database peavy;
 
 create table peavy.events (
-    timestamp DateTime('UTC') CODEC (DoubleDelta, ZSTD),
+    timestamp DateTime64(3, 'UTC') CODEC (DoubleDelta, ZSTD),
 
     type LowCardinality(String) CODEC (Delta(8), ZSTD),
     category LowCardinality(String) CODEC (ZSTD),
