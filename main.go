@@ -28,7 +28,7 @@ const (
 	DEF_LINE_SIZE  = 2 * 1024
 	MAX_LINE_SIZE  = 64 * 1024
 	FLUENTBIT_ADDR = "127.0.0.1:8001"
-	WRITE_RETRIES  = 10
+	DIAL_RETRIES   = 5
 )
 
 type LineHash struct {
@@ -110,24 +110,25 @@ func cleanLineLimiterExpiry(ticker *time.Ticker) {
 	}
 }
 
-// writeLine writes to fluent-bit, reconnecting with backoff since fluent-bit
-// drops connections while its input is paused due to backpressure.
-func writeLine(conn *net.Conn, line []byte) error {
+// Only dialing is retried: a failed write means earlier writes on the same
+// connection may be lost too, so the whole request must be retried by the client.
+func dialFluentBit() (net.Conn, error) {
 	var err error
-	for attempt := 1; attempt <= WRITE_RETRIES; attempt++ {
-		if *conn == nil {
-			*conn, err = net.Dial("tcp", FLUENTBIT_ADDR)
-		}
-		if err == nil {
-			if _, err = (*conn).Write(line); err == nil {
-				return nil
-			}
-			(*conn).Close()
-			*conn = nil
+	for attempt := 1; attempt <= DIAL_RETRIES; attempt++ {
+		var conn net.Conn
+		if conn, err = net.Dial("tcp", FLUENTBIT_ADDR); err == nil {
+			return conn, nil
 		}
 		time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
 	}
-	return err
+	return nil, err
+}
+
+func unavailable(ctx *fasthttp.RequestCtx, err error) {
+	log.Printf("error writing to fluentbit: %s", err)
+	ctx.SetConnectionClose()
+	ctx.Response.SetStatusCode(fasthttp.StatusServiceUnavailable)
+	fmt.Fprint(ctx, "Service Unavailable\n")
 }
 
 func handleHealth(ctx *fasthttp.RequestCtx) {
@@ -198,12 +199,12 @@ func handler(ctx *fasthttp.RequestCtx) {
 	defer bufferPool.Put(&buf)
 	buffered.Buffer(buf, MAX_LINE_SIZE)
 
-	var conn net.Conn
-	defer func() {
-		if conn != nil {
-			conn.Close()
-		}
-	}()
+	conn, err := dialFluentBit()
+	if err != nil {
+		unavailable(ctx, err)
+		return
+	}
+	defer conn.Close()
 
 	for buffered.Scan() {
 		bytes := buffered.Bytes()
@@ -215,11 +216,8 @@ func handler(ctx *fasthttp.RequestCtx) {
 			continue
 		}
 
-		if err := writeLine(&conn, bytes); err != nil {
-			log.Printf("error writing to fluentbit: %s", err)
-			ctx.SetConnectionClose()
-			ctx.Response.SetStatusCode(fasthttp.StatusServiceUnavailable)
-			fmt.Fprint(ctx, "Service Unavailable\n")
+		if _, err := conn.Write(bytes); err != nil {
+			unavailable(ctx, err)
 			return
 		}
 
