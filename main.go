@@ -25,8 +25,10 @@ import (
 )
 
 const (
-	DEF_LINE_SIZE = 2 * 1024
-	MAX_LINE_SIZE = 64 * 1024
+	DEF_LINE_SIZE  = 2 * 1024
+	MAX_LINE_SIZE  = 64 * 1024
+	FLUENTBIT_ADDR = "127.0.0.1:8001"
+	WRITE_RETRIES  = 10
 )
 
 type LineHash struct {
@@ -108,6 +110,26 @@ func cleanLineLimiterExpiry(ticker *time.Ticker) {
 	}
 }
 
+// writeLine writes to fluent-bit, reconnecting with backoff since fluent-bit
+// drops connections while its input is paused due to backpressure.
+func writeLine(conn *net.Conn, line []byte) error {
+	var err error
+	for attempt := 1; attempt <= WRITE_RETRIES; attempt++ {
+		if *conn == nil {
+			*conn, err = net.Dial("tcp", FLUENTBIT_ADDR)
+		}
+		if err == nil {
+			if _, err = (*conn).Write(line); err == nil {
+				return nil
+			}
+			(*conn).Close()
+			*conn = nil
+		}
+		time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+	}
+	return err
+}
+
 func handleHealth(ctx *fasthttp.RequestCtx) {
 	if errorCount > 3 {
 		ctx.Response.SetStatusCode(fasthttp.StatusInternalServerError)
@@ -131,6 +153,8 @@ func handler(ctx *fasthttp.RequestCtx) {
 		if r := recover(); r != nil {
 			log.Printf("panic: %v", r)
 			errorCount++
+			// Unread body bytes would otherwise be parsed as the next request
+			ctx.SetConnectionClose()
 			ctx.Response.SetStatusCode(fasthttp.StatusInternalServerError)
 			fmt.Fprint(ctx, "Internal Server Error\n")
 		}
@@ -165,16 +189,21 @@ func handler(ctx *fasthttp.RequestCtx) {
 		}
 	}
 
+	if closer, ok := reader.(io.Closer); ok {
+		defer closer.Close()
+	}
+
 	buffered := bufio.NewScanner(reader)
 	buf := *bufferPool.Get().(*[]byte)
+	defer bufferPool.Put(&buf)
 	buffered.Buffer(buf, MAX_LINE_SIZE)
 
-	conn, err := net.Dial("tcp", "127.0.0.1:8001")
-	if err != nil {
-		log.Printf("error connecting to fluentbit: %s", err)
-		panic(err)
-	}
-	defer conn.Close()
+	var conn net.Conn
+	defer func() {
+		if conn != nil {
+			conn.Close()
+		}
+	}()
 
 	for buffered.Scan() {
 		bytes := buffered.Bytes()
@@ -186,19 +215,16 @@ func handler(ctx *fasthttp.RequestCtx) {
 			continue
 		}
 
-		_, err = conn.Write(bytes)
-		if err != nil {
+		if err := writeLine(&conn, bytes); err != nil {
 			log.Printf("error writing to fluentbit: %s", err)
-			panic(err)
+			ctx.SetConnectionClose()
+			ctx.Response.SetStatusCode(fasthttp.StatusServiceUnavailable)
+			fmt.Fprint(ctx, "Service Unavailable\n")
+			return
 		}
 
 		lineCounter.Inc()
 		byteCounter.Add(float64(len(bytes)))
-	}
-	bufferPool.Put(&buf)
-
-	if closer, ok := reader.(io.Closer); ok {
-		closer.Close()
 	}
 
 	ctx.Response.SetStatusCode(fasthttp.StatusCreated)
